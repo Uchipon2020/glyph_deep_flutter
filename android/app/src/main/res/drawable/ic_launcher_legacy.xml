@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Fallback launcher icon for Android 7.x, which predates adaptive icons.
+  Same artwork, composed over a solid black square.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/ic_launcher_background" />
+    <item
+        android:drawable="@drawable/ic_launcher_foreground"
+        android:bottom="-13dp"
+        android:left="-13dp"
+        android:right="-13dp"
+        android:top="-13dp" />
+</layer-list>

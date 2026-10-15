@@ -1,0 +1,21 @@
+name: glyphdeep
+description: "地下迷宮 @ (GlyphDeep) - 記号だけで遊ぶダンジョン探索RPG"
+publish_to: 'none'
+version: 1.2.1+4
+
+environment:
+  sdk: ^3.13.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  in_app_purchase: ^3.3.1
+  shared_preferences: ^2.5.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

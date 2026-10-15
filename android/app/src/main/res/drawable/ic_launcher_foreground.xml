@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The "@" glyph, drawn from scratch as stroked paths. No external artwork.
+  108dp canvas; everything stays inside the 72dp adaptive-icon safe zone
+  (a circle of radius 36 around the centre).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Outer ring, left open towards the lower right. -->
+    <path
+        android:pathData="M78.4,71.8 A31,31 0 1 0 61.9,84.0"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+
+    <!-- Bowl of the inner "a". -->
+    <path
+        android:pathData="M51,43 A12,12 0 1 0 51,67 A12,12 0 1 0 51,43"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="6"
+        android:fillColor="#00000000" />
+
+    <!-- Stem of the inner "a". -->
+    <path
+        android:pathData="M63,43 L63,66"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+</vector>
