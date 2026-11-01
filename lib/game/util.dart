@@ -27,6 +27,14 @@ T pickWeighted<T>(List<T> items, int Function(T) weight) {
   return items.last;
 }
 
+/// まだ出ていない種類を優先しつつ、たまに重みつきの通常抽選も混ぜる（図鑑が揃いやすくなる）。
+T pickVariety<T>(List<T> kinds, int Function(T) weight, Set<T> seen) {
+  final unseen = kinds.where((k) => !seen.contains(k)).toList();
+  final k = unseen.isNotEmpty && chance(.75) ? pick(unseen) : pickWeighted(kinds, weight);
+  seen.add(k);
+  return k;
+}
+
 /// 8方向。Dart の「レコード」(dx, dy) で表す。
 const dirs8 = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)];
 

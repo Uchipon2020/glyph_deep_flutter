@@ -32,7 +32,7 @@ class Item {
   Item.potion(this.potion) : type = ItemType.potion;
   Item.scroll(this.scroll) : type = ItemType.scroll;
   Item.wand(this.wand, this.charges) : type = ItemType.wand;
-  Item.darts(this.count, {this.ench = 0}) : type = ItemType.dart;
+  Item.darts(this.count) : type = ItemType.dart;
   Item.weapon(this.name, this.lo, this.hi, {this.ench = 0}) : type = ItemType.weapon;
   Item.armor(this.name, this.value, {this.ench = 0}) : type = ItemType.armor;
 
@@ -46,7 +46,7 @@ class Item {
   int ench = 0; // 強化値 (+1 など)
   int charges = 0; // 杖の残り回数
   int amount = 0; // 金貨の枚数
-  int count = 1; // 重ねて持てる数
+  int count = 1; // 投げ矢の本数
 
   // 床に落ちているときの位置
   int x = -1, y = -1;
@@ -62,56 +62,23 @@ class Item {
         ItemType.wand => '/',
         ItemType.amulet => ',',
       };
-
-  bool get stackable =>
-      type == ItemType.food ||
-      type == ItemType.potion ||
-      type == ItemType.scroll ||
-      type == ItemType.dart;
-
-  /// 同じ種類なら1つの欄にまとめられる。
-  bool stacksWith(Item o) =>
-      stackable &&
-      o.type == type &&
-      o.potion == potion &&
-      o.scroll == scroll &&
-      o.ench == ench;
-
-  /// 1個だけ取り出した複製（投げる・盗まれるときに使う）。
-  Item takeOne() {
-    final c = Item._(type)
-      ..potion = potion
-      ..scroll = scroll
-      ..wand = wand
-      ..name = name
-      ..lo = lo
-      ..hi = hi
-      ..value = value
-      ..ench = ench
-      ..charges = charges
-      ..amount = amount
-      ..count = 1;
-    return c;
-  }
 }
 
 class Monster {
-  Monster(this.id, this.kind, this.hp, this.x, this.y) : maxHp = hp;
+  Monster(this.id, this.kind, this.hp, this.x, this.y);
 
   final int id;
   final MonsterKind kind;
   int hp;
-  final int maxHp;
   int x, y;
   bool asleep = false; // 自然な眠り（近づくと起きることがある）
   int deepSleep = 0; // 魔法の眠り。0 になるまで起きない
-  int confused = 0;
-  bool disguised = false; // ゼロックの擬態中
-  String disguiseGlyph = '';
+  int loot = 0; // 盗んだ金貨。倒すと落とす
 
   String get name => kind.name;
   bool has(Ability a) => kind.abilities.contains(a);
   bool get alive => hp > 0;
+  bool get awake => !asleep && deepSleep <= 0;
 }
 
 class Trap {
@@ -131,13 +98,11 @@ class Player {
   final inv = <Item>[];
   Item? weapon, armor;
 
-  int asleep = 0; // 眠り・凍結で動けない残りターン
-  int confused = 0; // 混乱の残りターン
-  int? heldBy; // 捕まえている怪物の id
-  bool detect = false; // 千里眼（この階の怪物が見える）
+  int asleep = 0; // 眠りで動けない残りターン
+  (int, int)? armed; // 罠の警告を出したマス。もう一度動くと踏む
 
   int get armorValue => armor == null ? 0 : armor!.value + armor!.ench;
 
   /// 満腹度（%）。
-  int get fullness => (food * 100 / maxFood).ceil().clamp(0, 100);
+  int get fullness => (food * 100 / maxFood).round().clamp(0, 100);
 }

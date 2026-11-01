@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../game/data.dart';
 import '../game/game.dart';
 import '../game/models.dart';
 import '../game/util.dart';
@@ -30,6 +31,7 @@ class _GameScreenState extends State<GameScreen> {
   _Panel? _panel;
   bool _sealedStore = false; // 購入画面を「深さ3の階段」から開いた
   Item? _selected;
+  bool _throwMode = false; // 持ち物パネルを「何を投げる？」として開いた
   bool _runMode = false; // 「走」ボタン
   Timer? _endTimer;
   final _focus = FocusNode();
@@ -92,7 +94,8 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   void _dirHold(int dx, int dy) {
-    if (_blocked || game.aim != null) return;
+    // 罠の警告を出した直後の長押しで、そのまま踏んでしまわないようにする
+    if (_blocked || game.aim != null || game.p.armed != null) return;
     game.startRun(dx, dy);
   }
 
@@ -104,6 +107,20 @@ class _GameScreenState extends State<GameScreen> {
     } else {
       game.rest();
     }
+  }
+
+  void _search() {
+    if (!_blocked && game.aim == null) game.search();
+  }
+
+  void _openInventory({bool throwing = false}) {
+    if (game.over) return;
+    _throwMode = throwing;
+    _open(_Panel.inventory);
+  }
+
+  void _throw() {
+    if (!_blocked && game.aim == null) _openInventory(throwing: true);
   }
 
   void _tapCell(int x, int y) {
@@ -162,14 +179,18 @@ class _GameScreenState extends State<GameScreen> {
       return KeyEventResult.handled;
     }
     switch (ch) {
-      case '.' || 's':
+      case '.':
         _center();
+      case 's':
+        _search();
+      case 't':
+        _throw();
       case 'Z':
         game.startRest();
       case '>' || '<':
         game.descend();
       case 'i':
-        _open(_Panel.inventory);
+        _openInventory();
       case '?':
         _open(_Panel.help);
       default:
@@ -263,13 +284,7 @@ class _GameScreenState extends State<GameScreen> {
   Widget _status() {
     final p = game.p;
     final full = p.fullness;
-    final hunger = p.food > 300 ? '' : p.food > 150 ? ' 空腹' : p.food > 50 ? ' 衰弱' : ' 瀕死';
-    final cond = [
-      if (p.confused > 0) '混乱',
-      if (p.heldBy != null) '捕縛',
-      if (p.detect) '千里眼',
-      if (game.hasAmulet) '護符',
-    ].join(' ');
+    final hunger = p.food > 300 ? '' : p.food > 150 ? ' 空腹' : p.food > 50 ? ' 衰弱' : ' 瀕死!';
     final style = TextStyle(fontFamily: monoFamily, fontSize: 13, color: const Color(0xFFCFCFCF));
     return Container(
       width: double.infinity,
@@ -281,10 +296,10 @@ class _GameScreenState extends State<GameScreen> {
           TextSpan(children: [
             TextSpan(text: '金${p.gold}  '),
             TextSpan(
-              text: '満腹度$full%$hunger',
+              text: '腹$full%$hunger',
               style: TextStyle(color: p.food > 300 ? null : const Color(0xFFFFB070)),
             ),
-            if (cond.isNotEmpty) TextSpan(text: '  $cond', style: const TextStyle(color: Color(0xFFFFCF7A))),
+            if (game.hasAmulet) const TextSpan(text: '  護符所持', style: TextStyle(color: Color(0xFFFFCF7A))),
           ]),
           style: style,
           maxLines: 1,
@@ -325,20 +340,16 @@ class _GameScreenState extends State<GameScreen> {
                   on: _runMode,
                   onDown: () => setState(() => _runMode = !_runMode),
                 ),
+                PadButton(label: '持物', fontSize: 16, onDown: _openInventory),
                 PadButton(
-                  label: '持物',
-                  fontSize: 16,
-                  onDown: () {
-                    if (!game.over) _open(_Panel.inventory);
-                  },
-                ),
-                PadButton(
-                  label: '階段',
+                  label: game.hasAmulet ? '階段(上る)' : '階段',
                   fontSize: 16,
                   onDown: () {
                     if (!_blocked) game.descend();
                   },
                 ),
+                PadButton(label: '探', fontSize: 16, onDown: _search),
+                PadButton(label: '投', fontSize: 16, onDown: _throw),
                 PadButton(label: '？', fontSize: 16, onDown: () => _open(_Panel.help)),
               ],
             ),
@@ -376,10 +387,15 @@ class _GameScreenState extends State<GameScreen> {
   List<Widget> _inventory() {
     final p = game.p;
     return [
-      _title('持ち物（タップで選択）'),
+      _title(_throwMode ? '何を投げる？' : '持ち物（タップで選択）'),
       if (p.inv.isEmpty) const Text('何も持っていない', style: TextStyle(color: Color(0xFF888888))),
       for (final (i, it) in p.inv.indexed)
         _button('${letter(i)}) ${game.nameOf(it)}${p.weapon == it || p.armor == it ? ' [装備中]' : ''}', () {
+          if (_throwMode) {
+            _close();
+            game.startAim(it, zap: false);
+            return;
+          }
           setState(() {
             _selected = it;
             _panel = _Panel.item;
@@ -398,8 +414,14 @@ class _GameScreenState extends State<GameScreen> {
 
     return [
       _title('${letter(game.p.inv.indexOf(it))}) ${game.nameOf(it)}'),
+      Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Text(game.descOf(it), style: const TextStyle(fontSize: 14, color: Color(0xFF9A9A9A))),
+      ),
+      if (game.canIdentify(it))
+        _button('鑑定する（金$identifyCost枚）', game.p.gold >= identifyCost ? () => game.identify(it) : null),
       if (label != null) _button(label, () => act(() => game.use(it))),
-      _button('投げる', () => act(() => game.startAim(it, zap: false))),
+      _button('投げる（方向を選ぶ）', () => act(() => game.startAim(it, zap: false))),
       _button('置く', () => act(() => game.drop(it))),
       _button('戻る', () => setState(() => _panel = _Panel.inventory)),
     ];
@@ -409,7 +431,7 @@ class _GameScreenState extends State<GameScreen> {
     final p = game.p, e = game.end!, b = widget.scores.best;
     return [
       _title(e.title),
-      _pre('${e.cause}\n\n到達した深さ: ${game.deepest}\n所持金: ${p.gold}\nレベル: ${p.level}\n'
+      _pre('${e.cause}\n\n到達した深さ: ${game.depth}\n所持金: ${p.gold}\nレベル: ${p.level}\n'
           '経過ターン: ${p.turns}\nスコア: ${game.score}'
           '${b == null ? '' : '\nベスト: ${b.score} (深さ${b.depth})'}'),
       _button('もう一度挑戦する', () {
@@ -509,9 +531,7 @@ class _GameScreenState extends State<GameScreen> {
       );
 }
 
-const _helpText = '''目的: 深さ${Game.maxDepth}まで降りて護符(,)を手に入れ、地上へ持ち帰る。
-護符を持つと階段(%)は上りになる。深さ1の階段を登れば脱出。
-登るたびに階は新しく作り直される。死ぬと最初から。
+const _helpText = '''目的: 深さ${Game.maxDepth}まで降りて護符(,)を手に入れ、再び地上（深さ1より上）まで戻れば脱出成功。死ぬと最初から。
 
 【無料版と深部解放】
 深さ${Game.freeMaxDepth}までは無料で遊べる。
@@ -519,38 +539,44 @@ const _helpText = '''目的: 深さ${Game.maxDepth}まで降りて護符(,)を�
 機種変更や再インストールのあとは、下の画面の「購入を復元」で戻せる。
 
 @ 自分     . 床      | - 壁
-# 通路     + 扉      % 階段
-^ 罠       * 金貨    ! 薬
-? 巻物     / 杖      ) 武器・投げ矢
-] 防具     : 食料    A-Z 怪物
++ 扉       # 通路    % 階段
+* 金貨     ! 薬      ? 巻物
+) 武器/投げ矢        ] 防具
+: 食料     / 杖      ^ 見つけた罠
+A-Z 怪物
 
-【満腹度】
-1歩ごとに減っていく。0%になると餓死する。
-15%を切ると「空腹」、減りすぎると体力が回復しなくなる。
-食料(:)を食べると100%に戻る。食料は見つけたら拾っておこう。
+【金貨】
+生還時にスコアへ加算されるほか、持ち物メニューで未鑑定の薬・巻物・杖を金$identifyCost枚で鑑定（使わずに正体を知る）できます。
 
-【投げる・振る】
-持物から「投げる」を選び、方向を十字ボタン（またはマップをタップ）で決める。
-投げ矢や短剣は投げるとよく当たる。薬を怪物に投げると、その効き目が怪物に出る（眠りの薬なら眠らせる）。
-杖は「振る」で、最初に当たった怪物に効く。
+【満腹度（腹）】
+画面下の「腹」は満腹度です。1ターンごとに減り、0になると餓死します。約$maxFoodターンで空になるので、食料(:)を見つけて食べてください。300を切ると「空腹」表示。
 
-【隠し扉と罠】
-深い階では、扉が壁に隠れていることがある。行き止まりや出口のない部屋では、壁の近くで[休]を長押しすると調べられる。
-床には見えない罠(^)がある。落とし穴、眠りガス、毒矢、転移。一度見つけた罠は自動移動で避ける。
+【罠と隠し扉】
+罠(^)は最初は見えないものがあります。踏むと発動します。見つけた罠は、もう一度動くまで踏みません。
+行き止まりや怪しい壁の前で「探」を押すと、隠し扉や罠を見つけられます。階段が見つからないときも「探」を試してください。
 
-【怪物の特技】
-眠らせる・凍らせる・混乱させる・捕まえる・金貨や持ち物を盗む・鎧を錆びさせる・レベルを吸う・矢を射る・炎を吐く・アイテムに化ける・姿が見えない、などがいる。
+【眠り】
+眠りガスの罠や、眠り花(F)、眠りの薬で自分が眠ると、その間に怪物が攻撃してきます。逆に、眠らせた敵への攻撃は2倍ダメージ。眠りの杖や、眠りの薬を敵に投げて使えます。
+
+【投げる／杖】
+[投]ボタンか持ち物から「投げる」を選び、方向を十字ボタン（またはマップをタップ）で決める。投げ矢・武器・薬を飛ばせます（薬は敵に効果）。杖は「振る」で方向を選ぶ。
+
+【怪物】
+泥棒(L)は金貨を盗んで逃げます。倒せば取り戻せます。
 
 【操作】
-・十字ボタン: 1歩進む（怪物へ動くと攻撃）
-・十字ボタンを長押し: その方向へ「何かあるまで」走る
+・十字ボタン: 1歩（怪物に向かうと攻撃）
+・十字ボタン長押し: 何かあるまで走る
 ・[走]ボタンON: 十字ボタンのタップで走る
 ・マップをタップ: 見えている場所まで自動移動
-・中央[休]: 1ターン休む（まわりを調べる）／長押し: 回復まで休む
-・[階段]: 階段の上なら降りる（護符を持っていれば登る）。見えていれば階段まで自動移動
-・[持物]: 使う・装備・投げる・置く
-・上のメッセージ欄をタップ: 履歴
+・中央[休]: 1ターン休む / 長押し: 回復まで休む
+・[階段]: 階段の上なら降りる（護符を持っていれば上る）。見えていれば自動移動
+・[探]: 周囲を5ターン調べる
+・[投]: 持ち物を選んで投げる
+・[持物]: 使う/装備/鑑定/投げる/置く
+・メッセージ欄をタップ: 履歴
 
 【キーボード】
 hjklyubn/矢印: 移動  Shift+移動: 走る
-. : 休む  Z : 回復まで休む  > < : 階段  i : 持物  Esc : 取消''';
+. : 休む  Z : 回復まで休む  s : 探す  t : 投げる
+> < : 階段  i : 持物  Esc : 取消''';

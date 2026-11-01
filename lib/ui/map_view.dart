@@ -104,7 +104,7 @@ class _MapPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final lv = game.lv;
-    final items = {for (final it in lv.items) (it.x, it.y): it};
+    final items = {for (final it in lv.items.reversed) (it.x, it.y): it}; // 同じマスなら先に置かれた物を見せる
     final mons = {
       for (final m in lv.monsters)
         if (game.isVisible(m)) (m.x, m.y): m
@@ -119,8 +119,8 @@ class _MapPainter extends CustomPainter {
           color = cPlayer;
           bold = true;
         } else if (mons[(x, y)] case final m?) {
-          s = game.glyphOf(m);
-          color = m.disguised ? cText : cMonster;
+          s = m.kind.ch;
+          color = cMonster;
         } else if (lv.seen[y][x]) {
           final t = lv.grid[y][x];
           s = t.glyph;

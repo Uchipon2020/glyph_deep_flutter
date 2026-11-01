@@ -42,30 +42,127 @@ void main() {
     final m = Monster(999, monsterKinds.firstWhere((k) => k.ch == 'E'), 500, x, y);
     g.lv.monsters.add(m);
     final darts = g.p.inv.firstWhere((it) => it.type == ItemType.dart);
-    for (var i = 0; i < 5; i++) {
+    for (var i = 0; i < 4; i++) {
       g.startAim(darts, zap: false);
       g.fireAim(1, 0);
     }
     expect(m.hp, lessThan(500));
-    expect(g.p.inv.contains(darts), isFalse); // 5本とも投げきった
+    expect(g.p.inv.contains(darts), isFalse); // 4本とも投げきった
   });
 
-  test('同じ薬は1つの欄にまとまる', () {
-    seedRandom(3);
-    final g = Game();
-    g.lv.monsters.clear();
+  /// 右隣のマスを、何もない床にする。
+  (int, int) clearRight(Game g) {
     final (x, y) = (g.p.x + 1, g.p.y);
+    g.lv.monsters.clear();
     g.lv.grid[y][x] = Tile.floor;
     g.lv.traps.remove((x, y));
     g.lv.items.removeWhere((it) => it.x == x && it.y == y);
+    return (x, y);
+  }
+
+  test('投げ矢は1つの欄にまとまり、薬は別の欄になる', () {
+    seedRandom(3);
+    final g = Game();
+    final (x, y) = clearRight(g);
     g.p.inv.add(Item.potion(Potion.heal));
     final before = g.p.inv.length;
+    g.lv.items.add(Item.darts(3)
+      ..x = x
+      ..y = y);
     g.lv.items.add(Item.potion(Potion.heal)
       ..x = x
       ..y = y);
     g.move(1, 0);
-    expect(g.p.inv.length, before);
-    expect(g.p.inv.last.count, 2);
+    expect(g.p.inv.length, before + 1);
+    expect(g.p.inv.firstWhere((it) => it.type == ItemType.dart).count, 7);
+  });
+
+  test('見えている罠は警告で止まり、もう一度動くと踏む', () {
+    seedRandom(8);
+    final g = Game();
+    final (x, y) = clearRight(g);
+    final (x0, y0) = (g.p.x, g.p.y);
+    g.lv.traps[(x, y)] = Trap(TrapKind.alarm)..found = true;
+    final turns = g.p.turns;
+    expect(g.move(1, 0), isFalse);
+    expect((g.p.x, g.p.y), (x0, y0));
+    expect(g.p.turns, turns); // 警告ではターンが進まない
+    expect(g.move(1, 0), isTrue);
+    expect((g.p.x, g.p.y), (x, y));
+    expect(g.p.armed, isNull);
+  });
+
+  test('探すと隣の隠し扉と罠が見つかる', () {
+    seedRandom(9);
+    final g = Game();
+    final (x, y) = clearRight(g);
+    g.lv.grid[y][x] = Tile.secretDoorV;
+    g.p
+      ..hp = 999
+      ..maxHp = 999;
+    for (var i = 0; i < 20 && g.lv.grid[y][x].isSecret; i++) {
+      g.search();
+    }
+    expect(g.lv.grid[y][x], Tile.door);
+  });
+
+  test('開始部屋には必ず見える扉がある', () {
+    seedRandom(10);
+    var id = 0;
+    for (var n = 0; n < 500; n++) {
+      final lv = generateLevel(Game.maxDepth, Game.maxDepth, () => ++id);
+      final r = lv.rooms[lv.roomId[lv.start.$2][lv.start.$1]];
+      final hasDoor = [
+        for (var y = r.y - 1; y <= r.y + r.h; y++)
+          for (var x = r.x - 1; x <= r.x + r.w; x++) lv.grid[y][x] == Tile.door
+      ].any((e) => e);
+      expect(hasDoor, isTrue);
+    }
+  });
+
+  test('眠っている怪物へのダメージは2倍で、魔法の眠りは攻撃でも覚めない', () {
+    seedRandom(11);
+    final g = Game();
+    final (x, y) = clearRight(g);
+    final m = Monster(999, monsterKinds.first, 500, x, y)..deepSleep = 20;
+    g.lv.monsters.add(m);
+    final wand = Item.wand(Wand.bolt, 1);
+    g.p.inv.add(wand);
+    g.startAim(wand, zap: true);
+    g.fireAim(1, 0);
+    final dmg = 500 - m.hp;
+    expect(dmg.isEven, isTrue);
+    expect(dmg, greaterThanOrEqualTo((6 + g.depth) * 2));
+    expect(m.awake, isFalse);
+  });
+
+  test('泥棒に盗まれた金貨は倒すと床に落ちる', () {
+    seedRandom(12);
+    final g = Game();
+    final (x, y) = clearRight(g);
+    final m = Monster(999, monsterKinds.firstWhere((k) => k.abilities.contains(Ability.steal)), 1, x, y)..loot = 40;
+    g.lv.monsters.add(m);
+    final wand = Item.wand(Wand.bolt, 1);
+    g.p.inv.add(wand);
+    g.startAim(wand, zap: true);
+    g.fireAim(1, 0);
+    expect(g.lv.monsters.contains(m), isFalse);
+    expect(g.lv.itemAt(x, y)?.amount, 40);
+  });
+
+  test('鑑定は金貨を払って種類を知る。足りなければ何も起きない', () {
+    seedRandom(13);
+    final g = Game();
+    final it = Item.potion(Potion.life);
+    g.p.inv.add(it);
+    g.identify(it);
+    expect(g.known.contains(Potion.life), isFalse);
+    g.p.gold = identifyCost;
+    final turns = g.p.turns;
+    g.identify(it);
+    expect(g.known.contains(Potion.life), isTrue);
+    expect(g.p.gold, 0);
+    expect(g.p.turns, turns);
   });
 
   test('ランダムに遊んでも例外が出ない', () {
@@ -84,10 +181,14 @@ void main() {
         } else if (r < 55) {
           final (dx, dy) = pick(dirs8);
           g.move(dx, dy);
-        } else if (r < 62) {
+        } else if (r < 60) {
           g.rest();
+        } else if (r < 62) {
+          g.search();
         } else if (r < 72 && g.p.inv.isNotEmpty) {
-          g.use(pick(g.p.inv));
+          final it = pick(g.p.inv);
+          if (t % 7 == 0) g.identify(it);
+          g.use(it);
         } else if (r < 78 && g.p.inv.isNotEmpty) {
           g.startAim(pick(g.p.inv), zap: false);
         } else if (r < 80 && g.p.inv.isNotEmpty) {
@@ -205,6 +306,6 @@ void main() {
     toStairs(); // 深さ1の階段を登る
     expect(g.over, isTrue);
     expect(g.end!.title, '脱出成功！');
-    expect(g.deepest, Game.maxDepth);
+    expect(g.depth, 1);
   });
 }

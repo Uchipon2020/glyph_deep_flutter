@@ -6,6 +6,14 @@ import 'data.dart';
 import 'models.dart';
 import 'util.dart';
 
+/// 1回の冒険を通して覚えておく、生成の偏りを減らすための記録。
+class GenMemory {
+  final potions = <Potion>{};
+  final scrolls = <Scroll>{};
+  final wands = <Wand>{};
+  TrapKind? lastTrap;
+}
+
 class Room {
   Room.real(this.index, this.x, this.y, this.w, this.h)
       : real = true,
@@ -74,9 +82,11 @@ class Level {
     return null;
   }
 
+  bool walkable(int x, int y) => inBounds(x, y) && grid[y][x].walkable;
+
   /// (x,y) から (nx,ny) へ1歩で動けるか。扉は斜めに出入りできない。
   bool canStep(int x, int y, int nx, int ny) {
-    if (!inBounds(nx, ny) || !grid[ny][nx].walkable) return false;
+    if (!walkable(nx, ny)) return false;
     if (nx != x && ny != y && (grid[y][x] == Tile.door || grid[ny][nx] == Tile.door)) {
       return false;
     }
@@ -107,8 +117,10 @@ class Level {
 }
 
 /// 新しい階を作る。最深部には護符を置く（amulet が false なら置かない＝持ち帰り中）。
-Level generateLevel(int depth, int maxDepth, int Function() nextMonsterId, {bool amulet = true}) {
+Level generateLevel(int depth, int maxDepth, int Function() nextMonsterId,
+    {bool amulet = true, GenMemory? memory}) {
   final lv = Level();
+  final mem = memory ?? GenMemory();
 
   // 9マスのうち、少なくとも4つは本物の部屋にする
   final real = List.generate(9, (_) => chance(.82));
@@ -170,8 +182,8 @@ Level generateLevel(int depth, int maxDepth, int Function() nextMonsterId, {bool
       edges.add((a, b));
     }
   }
-  // 深さ2以降は、扉の一部が隠し扉になる
-  final secretChance = depth >= 2 ? .12 : 0.0;
+  // 扉の一部が隠し扉になる。深いほど多い
+  final secretChance = .06 + .02 * depth;
   for (final (a, b) in edges) {
     _connect(lv, a < b ? a : b, a < b ? b : a, secretChance);
   }
@@ -179,18 +191,21 @@ Level generateLevel(int depth, int maxDepth, int Function() nextMonsterId, {bool
   final rr = lv.realRooms.toList();
   final startRoom = pick(rr);
   final stairRoom = pick(rr.where((r) => r != startRoom).toList());
+  // 開始部屋に見える出口が1つも無いと詰むので、隠し扉を1つ普通の扉にする
+  final exits = [
+    for (var y = startRoom.y - 1; y <= startRoom.y + startRoom.h; y++)
+      for (var x = startRoom.x - 1; x <= startRoom.x + startRoom.w; x++)
+        if (lv.grid[y][x] == Tile.door || lv.grid[y][x].isSecret) (x, y)
+  ];
+  if (exits.isNotEmpty && !exits.any((e) => lv.grid[e.$2][e.$1] == Tile.door)) {
+    final (x, y) = pick(exits);
+    lv.revealDoor(x, y);
+  }
   lv.start = lv.freeCell(startRoom)!;
-  // 階段は最深部にもある（護符を持ち帰るときに上り階段として使う）
+  // 階段は常に置く（降りるときも、護符を手にした後に地上へ戻るときも使う）
   final c = lv.freeCell(stairRoom, avoid: lv.start)!;
   lv.grid[c.$2][c.$1] = Tile.stairs;
   lv.stairs = c;
-  if (depth == maxDepth && amulet) {
-    final others = rr.where((r) => r != startRoom && r != stairRoom).toList();
-    final a = lv.freeCell(pick(others.isEmpty ? [stairRoom] : others), avoid: lv.start)!;
-    lv.items.add(Item.amulet()
-      ..x = a.$1
-      ..y = a.$2);
-  }
 
   void place(Item it) {
     final p = lv.freeCell(pick(rr), avoid: lv.start);
@@ -201,24 +216,26 @@ Level generateLevel(int depth, int maxDepth, int Function() nextMonsterId, {bool
     lv.items.add(it);
   }
 
+  if (depth == maxDepth && amulet) place(Item.amulet());
   for (var n = rnd(3, 5); n > 0; n--) {
-    place(randomItem(depth));
+    place(randomItem(depth, mem));
   }
-  if (chance(.5)) place(Item.food());
   for (var n = rnd(2, 3); n > 0; n--) {
     place(Item.gold(rnd(8, 25) + depth * 8));
   }
 
-  // 罠（見つかるまで見えない）
-  final others = rr.where((r) => r != startRoom).toList();
-  for (var n = rnd(0, 1 + depth ~/ 4); n > 0; n--) {
-    final p = lv.freeCell(pick(others));
+  // 深くなるほど落とし穴は出さない（体感がきつすぎるため）。同じ罠が連続しないようにする
+  final trapKinds = TrapKind.values.where((k) => k != TrapKind.pit || depth <= maxDepth - 3).toList();
+  for (var n = rnd(1, 2) + depth ~/ 3; n > 0; n--) {
+    final p = lv.freeCell(pick(rr), avoid: lv.start);
     if (p == null) continue;
-    final kinds = TrapKind.values.where((k) => k != TrapKind.pit || depth < maxDepth).toList();
-    lv.traps[p] = Trap(pick(kinds));
+    final k = pick(trapKinds.where((k) => k != mem.lastTrap).toList());
+    mem.lastTrap = k;
+    lv.traps[p] = Trap(k)..found = !chance(.7);
   }
 
-  for (var n = rnd(3, 4) + depth ~/ 4; n > 0; n--) {
+  final others = rr.where((r) => r != startRoom).toList();
+  for (var n = rnd(3, 4) + depth ~/ 3; n > 0; n--) {
     final p = lv.freeCell(pick(others));
     if (p != null) spawnMonster(lv, depth, p, nextMonsterId(), asleep: chance(.4));
   }
@@ -290,35 +307,31 @@ void _connect(Level lv, int a, int b, double secretChance) {
 Monster spawnMonster(Level lv, int depth, (int, int) p, int id, {bool asleep = false}) {
   final kinds = monsterKinds.where((k) => k.minDepth <= depth && depth <= k.maxDepth).toList();
   final kind = pick(kinds);
-  // 深さ9より下では、同じ怪物でも少しずつ打たれ強くなる（深さ12で約1.4倍）
-  final boost = depth > 8 ? kind.hp * (depth - 8) ~/ 10 : 0;
-  final m = Monster(id, kind, (kind.hp + boost + rnd(-1, 2)).clamp(1, 999), p.$1, p.$2)..asleep = asleep;
-  if (m.has(Ability.mimic)) {
-    m
-      ..disguised = true
-      ..asleep = false
-      ..disguiseGlyph = pick(['!', '?', '*', ']', ')', ':']);
-  }
+  final m = Monster(id, kind, (kind.hp + rnd(-1, 2)).clamp(1, 999), p.$1, p.$2)..asleep = asleep;
   lv.monsters.add(m);
   return m;
 }
 
+/// 武器・防具の格。深いほど良いものが出る。
+int _tier(int depth) {
+  final base = depth ~/ 3;
+  return rnd((base - 1).clamp(0, 3), (base + 1).clamp(0, 3));
+}
+
 /// 床に落ちているアイテムを1つ作る。
-Item randomItem(int depth) {
+Item randomItem(int depth, GenMemory mem) {
   final r = rnd(0, 99);
-  final tier = (rnd(0, 1 + depth ~/ 4)).clamp(0, 3);
-  final ench = chance(.3) ? rnd(1, 2) : 0;
-  if (r < 24) return Item.potion(pickWeighted<Potion>(Potion.values, (p) => p.weight));
-  if (r < 46) return Item.scroll(pickWeighted<Scroll>(Scroll.values, (s) => s.weight));
+  if (r < 24) return Item.potion(pickVariety<Potion>(Potion.values, (p) => p.weight, mem.potions));
+  if (r < 48) return Item.scroll(pickVariety<Scroll>(Scroll.values, (s) => s.weight, mem.scrolls));
   if (r < 54) return Item.food();
-  if (r < 64) return Item.darts(rnd(4, 8));
-  if (r < 72 && depth >= 2) {
-    return Item.wand(pickWeighted<Wand>(Wand.values, (w) => w.weight), rnd(3, 6));
+  if (r < 67) {
+    final (name, lo, hi) = weaponTable[_tier(depth)];
+    return Item.weapon(name, lo, hi, ench: chance(.3) ? rnd(1, 2) : 0);
   }
-  if (r < 86) {
-    final (name, lo, hi) = weaponTable[tier];
-    return Item.weapon(name, lo, hi, ench: ench);
+  if (r < 80) {
+    final (name, value) = armorTable[_tier(depth)];
+    return Item.armor(name, value, ench: chance(.3) ? rnd(1, 2) : 0);
   }
-  final (name, value) = armorTable[tier];
-  return Item.armor(name, value, ench: ench);
+  if (r < 89) return Item.darts(rnd(3, 7));
+  return Item.wand(pickVariety<Wand>(Wand.values, (w) => w.weight, mem.wands), rnd(3, 6));
 }

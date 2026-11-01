@@ -1,6 +1,6 @@
 # GlyphDeep（地下迷宮 @）Flutter 版
 
-HTML 版（`../glyph_deep/docs/source/glyph-dungeon.html`）を Dart で書き直したもの。WebView は使わない。
+HTML 版 v2（`~/mulmoclaude/artifacts/html/2026/09/glyph-dungeon-v2.html`）のルールを Dart で書き直したもの。WebView は使わない。
 
     flutter run            # 実機・シミュレータで起動
     flutter test           # ルールのテスト（自動プレイで最深部まで）
@@ -23,13 +23,12 @@ HTML 版（`../glyph_deep/docs/source/glyph-dungeon.html`）を Dart で書き�
       map_view.dart            マップ描画（CustomPainter）
       controls.dart            十字ボタンなど
 
-## HTML 版から増えたもの
+## HTML 版 v2 との違い
 
-- 投げる（投げ矢・武器・薬）、杖（雷・眠り・転移）
-- 満腹度の常時表示、同じ種類のアイテムをまとめて持つ
-- 隠し扉（深さ2以降）と罠（落とし穴・眠りガス・毒矢・転移）、[休]で調べる
-- 怪物 A〜Z の26種と特技（眠らせる・凍らせる・盗む・錆びさせる・吸う・射る・吐く・化ける・見えない など）
-- 薬（千里眼・混乱）と巻物（識別・眠りの霧・大声）
+- ルール（数値・確率・メッセージ）は HTML 版 v2 に合わせている。違うのは次の点だけ
+- 深さ3までの無料版と「深部解放」（HTML 版には課金がない）
+- 投げる・振るの方向は、別画面ではなく十字ボタンかマップのタップで選ぶ。[走]ボタンがある
+- 罠の警告の直後に長押ししても、そのまま走って踏まない
 
 ## 依存
 
@@ -42,7 +41,7 @@ HTML 版（`../glyph_deep/docs/source/glyph-dungeon.html`）を Dart で書き�
 
 - 深さ1〜3は無料（`Game.freeMaxDepth`）。深さ3の階段で「ここから先は製品版で」画面が出る
 - 非消耗型の課金アイテム（ID は iOS・Android 共通、一覧は `docs/store-listing.md`）
-  - `info.humedical.glyphdeep.fullunlock`「深部解放」: 深さ4〜12と護符を解放。深さ12で護符を拾い、深さ1の階段を登って地上に出ればクリア
+  - `info.humedical.glyphdeep.fullunlock`「深部解放」: 深さ4〜10と護符を解放。深さ10で護符を拾い、深さ1の階段を登って地上に出ればクリア
   - `info.humedical.glyphdeep.tip120` / `tip360` / `tip1000`: 応援（機能は変わらない）
 - 「購入を復元」は ？ → 「深部解放・購入の復元・応援」
 - 通信は課金処理だけ。Android は Play Billing Library が INTERNET 権限を追加する
