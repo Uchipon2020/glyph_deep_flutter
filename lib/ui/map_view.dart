@@ -119,8 +119,8 @@ class _MapPainter extends CustomPainter {
           color = cPlayer;
           bold = true;
         } else if (mons[(x, y)] case final m?) {
-          s = m.kind.ch;
-          color = cMonster;
+          s = game.glyphOf(m);
+          color = m.disguised ? cText : cMonster;
         } else if (lv.seen[y][x]) {
           final t = lv.grid[y][x];
           s = t.glyph;

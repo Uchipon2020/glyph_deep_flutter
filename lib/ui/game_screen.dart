@@ -32,7 +32,6 @@ class _GameScreenState extends State<GameScreen> {
   bool _sealedStore = false; // 購入画面を「深さ3の階段」から開いた
   Item? _selected;
   bool _throwMode = false; // 持ち物パネルを「何を投げる？」として開いた
-  bool _runMode = false; // 「走」ボタン
   Timer? _endTimer;
   final _focus = FocusNode();
 
@@ -86,8 +85,6 @@ class _GameScreenState extends State<GameScreen> {
     game.stopRun();
     if (game.aim != null) {
       game.fireAim(dx, dy);
-    } else if (_runMode) {
-      game.startRun(dx, dy);
     } else {
       game.move(dx, dy);
     }
@@ -285,6 +282,12 @@ class _GameScreenState extends State<GameScreen> {
     final p = game.p;
     final full = p.fullness;
     final hunger = p.food > 300 ? '' : p.food > 150 ? ' 空腹' : p.food > 50 ? ' 衰弱' : ' 瀕死!';
+    final cond = [
+      if (p.confused > 0) '混乱',
+      if (p.heldBy != null) '捕縛',
+      if (p.detect) '千里眼',
+      if (game.hasAmulet) '護符所持',
+    ].join(' ');
     final style = TextStyle(fontFamily: monoFamily, fontSize: 13, color: const Color(0xFFCFCFCF));
     return Container(
       width: double.infinity,
@@ -299,7 +302,7 @@ class _GameScreenState extends State<GameScreen> {
               text: '腹$full%$hunger',
               style: TextStyle(color: p.food > 300 ? null : const Color(0xFFFFB070)),
             ),
-            if (game.hasAmulet) const TextSpan(text: '  護符所持', style: TextStyle(color: Color(0xFFFFCF7A))),
+            if (cond.isNotEmpty) TextSpan(text: '  $cond', style: const TextStyle(color: Color(0xFFFFCF7A))),
           ]),
           style: style,
           maxLines: 1,
@@ -334,12 +337,6 @@ class _GameScreenState extends State<GameScreen> {
               crossAxisSpacing: 6,
               childAspectRatio: 72 / 58,
               children: [
-                PadButton(
-                  label: '走',
-                  fontSize: 16,
-                  on: _runMode,
-                  onDown: () => setState(() => _runMode = !_runMode),
-                ),
                 PadButton(label: '持物', fontSize: 16, onDown: _openInventory),
                 PadButton(
                   label: game.hasAmulet ? '階段(上る)' : '階段',
@@ -556,18 +553,18 @@ A-Z 怪物
 行き止まりや怪しい壁の前で「探」を押すと、隠し扉や罠を見つけられます。階段が見つからないときも「探」を試してください。
 
 【眠り】
-眠りガスの罠や、眠り花(F)、眠りの薬で自分が眠ると、その間に怪物が攻撃してきます。逆に、眠らせた敵への攻撃は2倍ダメージ。眠りの杖や、眠りの薬を敵に投げて使えます。
+眠りガスの罠や、眠り花(F)、眠り蛾(Q)、眠りの薬で自分が眠ると、その間に怪物が攻撃してきます。逆に、眠らせた敵への攻撃は2倍ダメージ。眠りの杖や、眠りの薬を敵に投げて使えます。
 
 【投げる／杖】
 [投]ボタンか持ち物から「投げる」を選び、方向を十字ボタン（またはマップをタップ）で決める。投げ矢・武器・薬を飛ばせます（薬は敵に効果）。杖は「振る」で方向を選ぶ。
 
-【怪物】
-泥棒(L)は金貨を盗んで逃げます。倒せば取り戻せます。
+【怪物の特技】
+泥棒(L)は金貨を盗んで逃げます。倒せば取り戻せます。レプラコーン(L)やニンフ(N)に盗まれた物は戻りません。
+ほかに、眠らせる・凍らせる・混乱させる・捕まえる・鎧を錆びさせる・力やレベルを吸う・矢を射る・炎を吐く・アイテムに化ける・姿が見えない、などがいます。
 
 【操作】
 ・十字ボタン: 1歩（怪物に向かうと攻撃）
 ・十字ボタン長押し: 何かあるまで走る
-・[走]ボタンON: 十字ボタンのタップで走る
 ・マップをタップ: 見えている場所まで自動移動
 ・中央[休]: 1ターン休む / 長押し: 回復まで休む
 ・[階段]: 階段の上なら降りる（護符を持っていれば上る）。見えていれば自動移動

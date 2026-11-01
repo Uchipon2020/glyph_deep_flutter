@@ -122,6 +122,8 @@ class Game extends ChangeNotifier {
       ..x = lv.start.$1
       ..y = lv.start.$2;
     p.armed = null;
+    p.heldBy = null;
+    p.detect = false;
     _updateFov();
   }
 
@@ -134,11 +136,20 @@ class Game extends ChangeNotifier {
 
   bool isAdjacent(int x, int y) => (x - p.x).abs() <= 1 && (y - p.y).abs() <= 1;
 
-  /// 怪物が画面に見えるか。
-  bool isVisible(Monster m) {
-    if (!m.alive) return false;
+  /// 怪物が同じ部屋か隣にいて、直接見えているか（千里眼は含まない）。
+  /// 走るのを止める判定はこちらを使う。千里眼で階全体が見えていても、遠くの怪物では止まらない。
+  bool inSight(Monster m) {
+    if (!m.alive || m.has(Ability.invisible)) return false;
     return (_visibleRoom >= 0 && lv.roomId[m.y][m.x] == _visibleRoom) || isAdjacent(m.x, m.y);
   }
+
+  /// 怪物が画面に映るか。
+  bool isVisible(Monster m) => m.alive && !m.has(Ability.invisible) && (p.detect || inSight(m));
+
+  String glyphOf(Monster m) => m.disguised ? m.disguiseGlyph : m.kind.ch;
+
+  /// 見えない相手は「何か」と呼ぶ。
+  String who(Monster m) => isVisible(m) ? m.name : '何か';
 
   void _updateFov() {
     _visibleRoom = lv.roomId[p.y][p.x];
@@ -180,6 +191,8 @@ class Game extends ChangeNotifier {
                 Potion.heal => '体力を回復します。満タンで飲むと最大HPが1増えます。',
                 Potion.life => '最大HPが4増え、全回復します。',
                 Potion.strength => '力が1上がります。',
+                Potion.detect => 'この階の怪物の居場所が分かります（次の階へ移るまで）。',
+                Potion.confuse => '飲むと目が回り、まっすぐ歩けなくなります。敵に投げるとふらつかせられます。',
                 Potion.poison => '飲むと有害です。敵に投げるとダメージを与えられます。',
                 Potion.sleep => '飲むと眠って危険です。敵に投げると眠らせられます。',
               },
@@ -190,6 +203,9 @@ class Game extends ChangeNotifier {
                 Scroll.map => 'この階の地図（隠し扉と罠を除く）が分かります。',
                 Scroll.enchantArmor => '着ている防具が+1されます。',
                 Scroll.enchantWeapon => '装備中の武器が+1されます。',
+                Scroll.identify => '持ち物の薬・巻物・杖の正体が分かります。',
+                Scroll.sleepMonsters => 'まわりの怪物を眠らせます。',
+                Scroll.wake => '階じゅうの怪物が目を覚まします。読まないほうが安全です。',
               },
         ItemType.wand => !known.contains(it.wand)
             ? '振って方向を選ぶと、光が直進して最初の敵に当たります。使うまで効果は分かりません。'
@@ -235,6 +251,7 @@ class Game extends ChangeNotifier {
       _die('餓死した');
       return;
     }
+    if (p.confused > 0 && --p.confused == 0) msg('頭がはっきりした');
     if (p.hp < p.maxHp && p.turns % (12 - p.level).clamp(3, 12) == 0) p.hp++;
     _searchAround(.05);
     _monstersAct();
@@ -250,15 +267,28 @@ class Game extends ChangeNotifier {
   /// 1歩動く（怪物がいれば攻撃）。動けなかったら false。
   bool move(int dx, int dy) {
     if (over) return false;
+    if (p.confused > 0 && chance(.5)) (dx, dy) = pick(dirs8);
     final nx = p.x + dx, ny = p.y + dy;
-    if (!lv.canStep(p.x, p.y, nx, ny)) return false;
+    if (!lv.canStep(p.x, p.y, nx, ny)) {
+      if (p.confused > 0) {
+        msg('ふらついて壁にぶつかった');
+        _afterPlayerAction();
+      }
+      return false;
+    }
     final m = lv.monsterAt(nx, ny);
+    final holder = _holder();
+    if (holder != null && m != holder) {
+      msg('${holder.name}に捕まっていて動けない！');
+      _afterPlayerAction();
+      return false;
+    }
     if (m != null) {
       p.armed = null;
       _attack(m);
     } else {
       final t = lv.traps[(nx, ny)];
-      if (t != null && t.found && p.armed != (nx, ny)) {
+      if (t != null && t.found && p.armed != (nx, ny) && p.confused == 0) {
         p.armed = (nx, ny);
         msg('罠がある！（${t.kind.label}）もう一度動くと踏みます');
         notifyListeners();
@@ -273,6 +303,16 @@ class Game extends ChangeNotifier {
     }
     _afterPlayerAction();
     return true;
+  }
+
+  Monster? _holder() {
+    final id = p.heldBy;
+    if (id == null) return null;
+    for (final m in lv.monsters) {
+      if (m.id == id && m.alive && isAdjacent(m.x, m.y)) return m;
+    }
+    p.heldBy = null;
+    return null;
   }
 
   /// その場で1ターン休む。
@@ -291,7 +331,7 @@ class Game extends ChangeNotifier {
     for (var n = 0; n < 5 && !over && !found; n++) {
       found = _searchAround(.35);
       _afterPlayerAction();
-      if (p.hp < hp0 || lv.monsters.any((m) => isVisible(m) && m.awake)) break;
+      if (p.hp < hp0 || lv.monsters.any((m) => inSight(m) && !m.disguised && m.awake)) break;
     }
     notifyListeners();
   }
@@ -364,6 +404,7 @@ class Game extends ChangeNotifier {
         ..x = pos.$1
         ..y = pos.$2;
     }
+    p.heldBy = null;
   }
 
   void _pickup() {
@@ -402,7 +443,14 @@ class Game extends ChangeNotifier {
     }
   }
 
+  void _reveal(Monster m) {
+    if (!m.disguised) return;
+    m.disguised = false;
+    msg('それは${m.name}だった！');
+  }
+
   void _attack(Monster m) {
+    _reveal(m);
     final w = p.weapon;
     final lo = w == null ? 1 : w.lo + w.ench, hi = w == null ? 2 : w.hi + w.ench;
     final strBonus = p.str > 16 ? ((p.str - 16) / 2).ceil() : 0;
@@ -410,28 +458,30 @@ class Game extends ChangeNotifier {
       _damage(m, max(1, rnd(lo, hi) + p.level ~/ 2 + strBonus));
     } else {
       m.asleep = false;
-      msg('${m.name}への攻撃は外れた');
+      msg('${who(m)}への攻撃は外れた');
     }
   }
 
   /// 怪物にダメージを与える（眠っていれば2倍。倒したら経験値）。
   void _damage(Monster m, int d) {
+    final name = who(m);
     final sleeping = !m.awake;
     if (sleeping) d *= 2;
     m
       ..asleep = false
       ..hp = m.hp - d;
     if (m.alive) {
-      msg('${m.name}に$dダメージ${sleeping ? '（不意打ち）' : ''}');
+      msg('$nameに$dダメージ${sleeping ? '（不意打ち）' : ''}');
       return;
     }
-    msg('${m.name}を倒した (+${m.kind.xp}exp)${sleeping ? ' 不意打ち！' : ''}');
+    msg('$nameを倒した (+${m.kind.xp}exp)${sleeping ? ' 不意打ち！' : ''}');
     if (m.loot > 0) {
       lv.items.add(Item.gold(m.loot)
         ..x = m.x
         ..y = m.y);
     }
     p.xp += m.kind.xp;
+    if (p.heldBy == m.id) p.heldBy = null;
     while (p.level < xpNeeded.length && p.xp >= xpNeeded[p.level - 1]) {
       final g = rnd(4, 8);
       p
@@ -590,6 +640,12 @@ class Game extends ChangeNotifier {
       case Potion.sleep:
         msg('眠ってしまった…');
         p.asleep = max(p.asleep, 4);
+      case Potion.confuse:
+        p.confused = rnd(6, 10);
+        msg('目が回る…まっすぐ歩けない');
+      case Potion.detect:
+        p.detect = true;
+        msg('この階の怪物の気配がわかる');
     }
   }
 
@@ -621,6 +677,29 @@ class Game extends ChangeNotifier {
         } else {
           msg('何も起こらなかった');
         }
+      case Scroll.identify:
+        final found = <String>[];
+        for (final it in p.inv) {
+          final kind = it.potion ?? it.scroll ?? it.wand;
+          if (kind != null && known.add(kind)) found.add(nameOf(it));
+        }
+        msg(found.isEmpty ? '新しくわかったことはなかった' : '判明: ${found.join('、')}');
+      case Scroll.sleepMonsters:
+        var n = 0;
+        for (final m in lv.monsters) {
+          if ((m.x - p.x).abs() <= 7 && (m.y - p.y).abs() <= 5) {
+            m.deepSleep = rnd(10, 20);
+            n++;
+          }
+        }
+        msg(n > 0 ? '眠りの霧が広がり、まわりの怪物が眠った' : '眠りの霧が広がった');
+      case Scroll.wake:
+        for (final m in lv.monsters) {
+          m
+            ..asleep = false
+            ..deepSleep = 0;
+        }
+        msg('大きな声が響き渡った！怪物たちが目を覚ました');
     }
   }
 
@@ -705,8 +784,9 @@ class Game extends ChangeNotifier {
       return;
     }
     if (m != null) {
+      _reveal(m);
       if (obj.type == ItemType.scroll || obj.type == ItemType.wand || obj.type == ItemType.food) {
-        msg('${m.name}には当たったが、効果はない');
+        msg('${who(m)}には当たったが、効果はない');
       } else {
         final (hit, d) = switch (obj.type) {
           ItemType.dart => (.85, rnd(1, 4)),
@@ -728,17 +808,21 @@ class Game extends ChangeNotifier {
   }
 
   void _potionHits(Monster m, Potion k) {
+    final name = who(m);
     known.add(k);
     switch (k) {
       case Potion.sleep:
         m.deepSleep = rnd(10, 16);
-        msg('${m.name}は眠りに落ちた！');
+        msg('$nameは眠りに落ちた！');
       case Potion.poison:
         msg('毒の薬を浴びた！');
         _damage(m, rnd(4, 9));
       case Potion.heal || Potion.life:
         m.hp += rnd(5, 10);
-        msg('${m.name}の傷が癒えた…');
+        msg('$nameの傷が癒えた…');
+      case Potion.confuse:
+        m.confused = rnd(6, 10);
+        msg('$nameはふらふらしている');
       default:
         msg('薬は効果がなかったようだ');
     }
@@ -758,10 +842,12 @@ class Game extends ChangeNotifier {
       msg('光は何もない場所へ消えた');
       return;
     }
+    m.disguised = false;
+    final name = who(m);
     switch (k) {
       case Wand.sleep:
         m.deepSleep = rnd(15, 25);
-        msg('${m.name}は深い眠りについた');
+        msg('$nameは深い眠りについた');
       case Wand.teleport:
         final pos = _randomCell();
         if (pos != null) {
@@ -769,9 +855,10 @@ class Game extends ChangeNotifier {
             ..x = pos.$1
             ..y = pos.$2;
         }
-        msg('${m.name}は消え去った');
+        if (p.heldBy == m.id) p.heldBy = null;
+        msg('$nameは消え去った');
       case Wand.bolt:
-        msg('魔弾が${m.name}を貫いた！');
+        msg('魔弾が$nameを貫いた！');
         _damage(m, rnd(6, 12) + depth);
     }
   }
@@ -782,64 +869,140 @@ class Game extends ChangeNotifier {
     for (final m in lv.monsters.toList()) {
       if (over) return;
       if (!m.alive) continue;
+      if (m.has(Ability.regen) && m.hp < m.maxHp && p.turns.isEven) m.hp++;
       if (m.deepSleep > 0) {
         m.deepSleep--;
         continue;
       }
-      final d = dist[m.y][m.x];
       if (m.asleep) {
-        if (d <= 3 && chance(.3)) {
+        if (dist[m.y][m.x] <= 3 && chance(.3)) {
           m.asleep = false;
         } else {
           continue;
         }
       }
-      if (isAdjacent(m.x, m.y) && lv.canStep(m.x, m.y, p.x, p.y)) {
-        _monsterAttack(m);
-        continue;
-      }
-      if (m.has(Ability.stationary)) continue;
-
-      bool free(int x, int y) =>
-          lv.canStep(m.x, m.y, x, y) && lv.monsterAt(x, y) == null && (x, y) != (p.x, p.y);
-      (int, int)? mv;
-      if ((m.has(Ability.erratic) && chance(.5)) || d > 14) {
-        if (d <= 14 || chance(.2)) {
-          for (final (dx, dy) in shuffled(dirs8)) {
-            if (free(m.x + dx, m.y + dy)) {
-              mv = (m.x + dx, m.y + dy);
-              break;
-            }
-          }
-        }
-      } else {
-        var best = d;
-        for (final (dx, dy) in shuffled(dirs8)) {
-          final x = m.x + dx, y = m.y + dy;
-          if (lv.inBounds(x, y) && free(x, y) && dist[y][x] < best) {
-            best = dist[y][x];
-            mv = (x, y);
-          }
-        }
-      }
-      if (mv != null) {
-        m
-          ..x = mv.$1
-          ..y = mv.$2;
+      if (m.disguised) continue;
+      if (m.has(Ability.slow) && p.turns.isOdd) continue;
+      final steps = m.has(Ability.fast) ? 2 : 1;
+      for (var k = 0; k < steps && m.alive && !over; k++) {
+        _monsterStep(m, dist);
       }
     }
     lv.monsters.removeWhere((m) => !m.alive);
   }
 
-  void _monsterAttack(Monster m) {
-    if (!chance((.9 - .05 * p.armorValue).clamp(.3, .95))) {
-      msg('${m.name}の攻撃をかわした');
+  void _monsterStep(Monster m, List<List<int>> dist) {
+    final d = dist[m.y][m.x];
+    if (isAdjacent(m.x, m.y) && lv.canStep(m.x, m.y, p.x, p.y)) {
+      _monsterAttack(m);
       return;
     }
+    if (m.has(Ability.stationary)) return;
+    if ((m.has(Ability.ranged) || m.has(Ability.breath)) && _shoot(m)) return;
+
+    bool free(int x, int y) =>
+        lv.canStep(m.x, m.y, x, y) && lv.monsterAt(x, y) == null && (x, y) != (p.x, p.y);
+    (int, int)? mv;
+    if (m.confused > 0 || (m.has(Ability.erratic) && chance(.5)) || d > 14) {
+      if (m.confused > 0) m.confused--;
+      if (d <= 14 || chance(.2)) {
+        for (final (dx, dy) in shuffled(dirs8)) {
+          if (free(m.x + dx, m.y + dy)) {
+            mv = (m.x + dx, m.y + dy);
+            break;
+          }
+        }
+      }
+    } else {
+      var best = d;
+      for (final (dx, dy) in shuffled(dirs8)) {
+        final x = m.x + dx, y = m.y + dy;
+        if (lv.inBounds(x, y) && free(x, y) && dist[y][x] < best) {
+          best = dist[y][x];
+          mv = (x, y);
+        }
+      }
+    }
+    if (mv != null) {
+      m
+        ..x = mv.$1
+        ..y = mv.$2;
+    }
+  }
+
+  /// 離れたところから射る・吹く。一直線に並び、間に何もないときだけ。
+  bool _shoot(Monster m) {
+    final dx = p.x - m.x, dy = p.y - m.y;
+    final n = dx.abs() > dy.abs() ? dx.abs() : dy.abs();
+    if (n < 2 || n > 7 || !inSight(m)) return false;
+    if (dx != 0 && dy != 0 && dx.abs() != dy.abs()) return false;
+    final sx = dx.sign, sy = dy.sign;
+    var (x, y) = (m.x, m.y);
+    for (var k = 0; k < n; k++) {
+      if (!lv.canStep(x, y, x + sx, y + sy)) return false;
+      x += sx;
+      y += sy;
+      if (k < n - 1 && lv.monsterAt(x, y) != null) return false;
+    }
+    final breath = m.has(Ability.breath);
+    if (!chance(breath ? .25 : .35)) return false;
+    if (breath) {
+      final dmg = rnd(6, 16);
+      msg('${m.name}が炎を吐いた！$dmgダメージを受けた');
+      _hurt(dmg, '${m.name}の炎に焼かれた');
+    } else if (chance((.8 - .04 * p.armorValue).clamp(.25, .9))) {
+      final dmg = rnd(1, 6);
+      msg('${m.name}の矢が当たった！$dmgダメージを受けた');
+      _hurt(dmg, '${m.name}の矢に倒れた');
+    } else {
+      msg('${m.name}の矢をかわした');
+    }
+    return true;
+  }
+
+  void _monsterAttack(Monster m) {
+    final name = who(m);
+    if (!chance((.9 - .05 * p.armorValue).clamp(.3, .95))) {
+      msg('$nameの攻撃をかわした');
+      return;
+    }
+    // ダメージの代わりに何かされる攻撃
+    if (m.has(Ability.stealGold) && p.gold > 0) {
+      final amt = (rnd(20, 50) + depth * 10).clamp(1, p.gold);
+      p.gold -= amt;
+      m.hp = 0;
+      msg('$nameに金貨を$amt枚盗まれた！$nameは消えた');
+      return;
+    }
+    if (m.has(Ability.stealItem) && chance(.6)) {
+      final cands = p.inv.where((it) => it != p.weapon && it != p.armor).toList();
+      if (cands.isNotEmpty) {
+        final it = pick(cands);
+        final String stolen;
+        if (it.type == ItemType.dart && it.count > 1) {
+          it.count--;
+          stolen = nameOf(Item.darts(1));
+        } else {
+          p.inv.remove(it);
+          stolen = nameOf(it);
+        }
+        m.hp = 0;
+        msg('$nameに$stolenを盗まれた！$nameは消えた');
+        return;
+      }
+    }
+    if (m.has(Ability.rust) && p.armor != null && p.armor!.ench > -3 && chance(.5)) {
+      p.armor!.ench--;
+      msg('$nameに触れられ、鎧が錆びた！');
+      return;
+    }
+
     final dmg = rnd(m.kind.lo, m.kind.hi);
-    msg('${m.name}に$dmgダメージを受けた');
+    msg('$nameに$dmgダメージを受けた');
     _hurt(dmg, '${m.name}に倒された');
     if (over) return;
+
+    // ダメージに加えて起こること
     if (m.has(Ability.sleepTouch) && chance(.5)) {
       p.asleep = max(p.asleep, rnd(3, 5));
       msg('花粉を吸って眠り込んだ！');
@@ -848,13 +1011,45 @@ class Game extends ChangeNotifier {
       final g = min(p.gold, rnd(15, 40) + depth * 5);
       p.gold -= g;
       m.loot += g;
-      msg('${m.name}に金貨$g枚を盗まれた！（倒せば取り戻せる）');
+      msg('$nameに金貨$g枚を盗まれた！（倒せば取り戻せる）');
       final pos = _randomCell();
       if (pos != null) {
         m
           ..x = pos.$1
           ..y = pos.$2;
       }
+    }
+    if (m.has(Ability.freeze) && p.asleep == 0 && chance(.4)) {
+      p.asleep = rnd(2, 4);
+      msg('体が凍りついて動けない！');
+    }
+    if (m.has(Ability.sleep) && p.asleep == 0 && chance(.4)) {
+      p.asleep = rnd(3, 5);
+      msg('眠りの鱗粉を浴びて眠ってしまった…');
+    }
+    if (m.has(Ability.drainStr) && chance(.35) && p.str > 3) {
+      p.str--;
+      msg('毒で力が落ちた');
+    }
+    if (m.has(Ability.hold) && p.heldBy == null) {
+      p.heldBy = m.id;
+      msg('$nameに捕まった！倒すまで逃げられない');
+    }
+    if (m.has(Ability.confuse) && chance(.35)) {
+      p.confused = rnd(4, 8);
+      msg('$nameの眼を見て頭が混乱した');
+    }
+    if (m.has(Ability.drainLevel) && p.level > 1 && chance(.25)) {
+      p.level--;
+      p.xp = p.level > 1 ? xpNeeded[p.level - 2] : 0;
+      p.maxHp = (p.maxHp - rnd(3, 6)).clamp(10, 999);
+      p.hp = p.hp.clamp(1, p.maxHp);
+      msg('レベルを吸い取られた！（Lv${p.level}）');
+    }
+    if (m.has(Ability.drainMax) && chance(.3) && p.maxHp > 10) {
+      p.maxHp--;
+      p.hp = p.hp.clamp(1, p.maxHp);
+      msg('生命力を吸われた！最大HPが減った');
     }
   }
 
@@ -950,7 +1145,7 @@ class Game extends ChangeNotifier {
 
   Set<int> _visibleIds() => {
         for (final m in lv.monsters)
-          if (isVisible(m)) m.id
+          if (inSight(m) && !m.disguised) m.id
       };
 
   /// まわり8マスの「気になるもの」（扉・階段・アイテム・見つけた罠）。
@@ -1014,10 +1209,10 @@ class Game extends ChangeNotifier {
     if (ok) {
       if (p.hp < hp0 || msgCount > msgs0) ok = false;
       for (final m in lv.monsters) {
-        if (isVisible(m) && (m.awake || !vis0.contains(m.id))) ok = false;
+        if (inSight(m) && !m.disguised && (m.awake || !vis0.contains(m.id))) ok = false;
       }
     }
-    if (!ok) {
+    if (!ok || p.confused > 0) {
       stopRun();
       return;
     }

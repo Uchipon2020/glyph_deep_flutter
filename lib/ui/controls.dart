@@ -13,14 +13,12 @@ class PadButton extends StatefulWidget {
     required this.label,
     required this.onDown,
     this.onHold,
-    this.on = false,
     this.fontSize = 22,
   });
 
   final String label;
   final VoidCallback onDown;
   final VoidCallback? onHold;
-  final bool on; // 押しっぱなし表示（「走」の ON など）
   final double fontSize;
 
   @override
@@ -53,7 +51,6 @@ class _PadButtonState extends State<PadButton> {
 
   @override
   Widget build(BuildContext context) {
-    final lit = _pressed || widget.on;
     return Listener(
       onPointerDown: _down,
       onPointerUp: _up,
@@ -62,17 +59,15 @@ class _PadButtonState extends State<PadButton> {
         height: 58,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: lit ? const Color(0xFF3A3A3A) : Colors.black,
-          border: Border.all(
-            color: widget.on ? Colors.white : (lit ? const Color(0xFFAAAAAA) : const Color(0xFF555555)),
-          ),
+          color: _pressed ? const Color(0xFF3A3A3A) : Colors.black,
+          border: Border.all(color: _pressed ? const Color(0xFFAAAAAA) : const Color(0xFF555555)),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Text(
           widget.label,
           style: TextStyle(
             fontSize: widget.fontSize,
-            color: widget.on ? Colors.white : const Color(0xFFDDDDDD),
+            color: const Color(0xFFDDDDDD),
           ),
         ),
       ),

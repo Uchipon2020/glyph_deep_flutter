@@ -65,15 +65,19 @@ class Item {
 }
 
 class Monster {
-  Monster(this.id, this.kind, this.hp, this.x, this.y);
+  Monster(this.id, this.kind, this.hp, this.x, this.y) : maxHp = hp;
 
   final int id;
   final MonsterKind kind;
   int hp;
+  final int maxHp;
   int x, y;
   bool asleep = false; // 自然な眠り（近づくと起きることがある）
   int deepSleep = 0; // 魔法の眠り。0 になるまで起きない
   int loot = 0; // 盗んだ金貨。倒すと落とす
+  int confused = 0;
+  bool disguised = false; // ゼロックの擬態中
+  String disguiseGlyph = '';
 
   String get name => kind.name;
   bool has(Ability a) => kind.abilities.contains(a);
@@ -98,7 +102,10 @@ class Player {
   final inv = <Item>[];
   Item? weapon, armor;
 
-  int asleep = 0; // 眠りで動けない残りターン
+  int asleep = 0; // 眠り・凍結で動けない残りターン
+  int confused = 0; // 混乱の残りターン
+  int? heldBy; // 捕まえている怪物の id
+  bool detect = false; // 千里眼（この階の怪物が見える）
   (int, int)? armed; // 罠の警告を出したマス。もう一度動くと踏む
 
   int get armorValue => armor == null ? 0 : armor!.value + armor!.ench;

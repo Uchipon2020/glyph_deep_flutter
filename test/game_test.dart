@@ -165,6 +165,178 @@ void main() {
     expect(g.p.turns, turns);
   });
 
+  test('巻物を読んだあとも、離れた起きている怪物がいても走れる', () async {
+    for (final k in Scroll.values) {
+      seedRandom(14);
+      final g = Game();
+      // 一本道の通路だけの階にする
+      for (var y = 0; y < Level.height; y++) {
+        for (var x = 0; x < Level.width; x++) {
+          g.lv.grid[y][x] = Tile.rock;
+          g.lv.roomId[y][x] = -1;
+        }
+      }
+      for (var x = 5; x <= 30; x++) {
+        g.lv.grid[10][x] = Tile.corridor;
+      }
+      g.lv
+        ..items.clear()
+        ..traps.clear()
+        ..monsters.clear();
+      g.p
+        ..x = 5
+        ..y = 10
+        ..inv.add(Item.scroll(k));
+      if (k == Scroll.teleport) continue; // 部屋がないので飛べない
+      g.use(g.p.inv.last);
+      g.lv.grid[2][2] = Tile.floor;
+      g.lv.monsters.add(Monster(999, monsterKinds.first, 10, 2, 2));
+      g.startRun(1, 0);
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      g.stopRun();
+      expect(g.p.x, greaterThan(7), reason: k.name);
+    }
+  });
+
+  /// 一本道の通路だけの階で始める。
+  Game corridorGame() {
+    final g = Game();
+    for (var y = 0; y < Level.height; y++) {
+      for (var x = 0; x < Level.width; x++) {
+        g.lv.grid[y][x] = Tile.rock;
+        g.lv.roomId[y][x] = -1;
+      }
+    }
+    for (var x = 5; x <= 30; x++) {
+      g.lv.grid[10][x] = Tile.corridor;
+    }
+    g.lv
+      ..items.clear()
+      ..traps.clear()
+      ..monsters.clear();
+    g.p
+      ..x = 5
+      ..y = 10;
+    return g;
+  }
+
+  Future<void> runRight(Game g) async {
+    g.startRun(1, 0);
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    g.stopRun();
+  }
+
+  test('千里眼で遠くの怪物が見えていても走れる', () async {
+    seedRandom(15);
+    final g = corridorGame();
+    g.p.inv.add(Item.potion(Potion.detect));
+    g.use(g.p.inv.last);
+    expect(g.p.detect, isTrue);
+    g.lv.grid[2][2] = Tile.floor;
+    final far = Monster(999, monsterKinds.first, 10, 2, 2);
+    g.lv.monsters.add(far);
+    expect(g.isVisible(far), isTrue); // 画面には映る
+    expect(g.inSight(far), isFalse);
+    await runRight(g);
+    expect(g.p.x, greaterThan(7));
+  });
+
+  test('千里眼でも、近づいた怪物では止まる', () async {
+    seedRandom(16);
+    final g = corridorGame();
+    g.p.detect = true;
+    final kind = monsterKinds.firstWhere((k) => k.abilities.contains(Ability.stationary));
+    g.lv.monsters.add(Monster(999, kind, 500, 9, 10));
+    g.p
+      ..hp = 999
+      ..maxHp = 999;
+    await runRight(g);
+    expect(g.p.x, lessThanOrEqualTo(8));
+  });
+
+  test('A〜Zがそろい、どの深さにも怪物が出る', () {
+    final letters = monsterKinds.map((k) => k.ch).toSet();
+    expect(letters.length, 26);
+    expect(monsterKinds.length, 28);
+    for (var d = 1; d <= Game.maxDepth; d++) {
+      expect(monsterKinds.any((k) => k.minDepth <= d && d <= k.maxDepth), isTrue);
+    }
+    for (final k in monsterKinds) {
+      expect(k.minDepth, lessThanOrEqualTo(Game.maxDepth), reason: k.name);
+    }
+  });
+
+  test('ゼロックは攻撃すると正体を現す', () {
+    seedRandom(17);
+    var id = 0;
+    final g = corridorGame();
+    final lv = Level();
+    Monster? m;
+    while (m == null || !m.has(Ability.mimic)) {
+      m = spawnMonster(lv, 8, (11, 10), ++id);
+    }
+    expect(m.disguised, isTrue);
+    g.lv.monsters.add(m..x = 6);
+    expect(g.glyphOf(m), isNot('X'));
+    g.p
+      ..hp = 999
+      ..maxHp = 999;
+    g.move(1, 0);
+    expect(m.disguised, isFalse);
+    expect(g.glyphOf(m), 'X');
+  });
+
+  test('捕まると離れられず、倒すと解放される', () {
+    seedRandom(18);
+    final g = corridorGame();
+    g.p
+      ..x = 10
+      ..hp = 999
+      ..maxHp = 999;
+    final kind = monsterKinds.firstWhere((k) => k.abilities.contains(Ability.hold));
+    final m = Monster(999, kind, 1, 11, 10);
+    g.lv.monsters.add(m);
+    g.p.heldBy = m.id;
+    expect(g.move(-1, 0), isFalse);
+    expect(g.p.x, 10);
+    final wand = Item.wand(Wand.bolt, 1);
+    g.p.inv.add(wand);
+    g.startAim(wand, zap: true);
+    g.fireAim(1, 0);
+    expect(g.p.heldBy, isNull);
+    expect(g.move(-1, 0), isTrue);
+  });
+
+  test('見えない怪物は映らず、名前は「何か」になる', () {
+    seedRandom(19);
+    final g = corridorGame();
+    final kind = monsterKinds.firstWhere((k) => k.abilities.contains(Ability.invisible));
+    final m = Monster(999, kind, 10, 6, 10);
+    g.lv.monsters.add(m);
+    g.p.detect = true;
+    expect(g.isVisible(m), isFalse);
+    expect(g.who(m), '何か');
+  });
+
+  test('レプラコーンは金貨を盗んで消え、戻ってこない', () {
+    seedRandom(20);
+    final g = corridorGame();
+    g.p
+      ..gold = 1000
+      ..hp = 999
+      ..maxHp = 999;
+    final kind = monsterKinds.firstWhere((k) => k.abilities.contains(Ability.stealGold));
+    final m = Monster(999, kind, 10, 6, 10);
+    g.lv.monsters.add(m);
+    for (var i = 0; i < 50 && m.alive; i++) {
+      g.rest();
+    }
+    expect(m.alive, isFalse);
+    expect(g.p.gold, lessThan(1000));
+    expect(g.lv.monsters.contains(m), isFalse);
+    expect(g.lv.items.any((it) => it.type == ItemType.gold), isFalse);
+  });
+
   test('ランダムに遊んでも例外が出ない', () {
     var deepest = 0;
     for (var seed = 0; seed < 40; seed++) {

@@ -308,6 +308,12 @@ Monster spawnMonster(Level lv, int depth, (int, int) p, int id, {bool asleep = f
   final kinds = monsterKinds.where((k) => k.minDepth <= depth && depth <= k.maxDepth).toList();
   final kind = pick(kinds);
   final m = Monster(id, kind, (kind.hp + rnd(-1, 2)).clamp(1, 999), p.$1, p.$2)..asleep = asleep;
+  if (m.has(Ability.mimic)) {
+    m
+      ..disguised = true
+      ..asleep = false
+      ..disguiseGlyph = pick(['!', '?', '*', ']', ')', ':']);
+  }
   lv.monsters.add(m);
   return m;
 }
